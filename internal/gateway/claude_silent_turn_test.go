@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tidwall/gjson"
 	"github.com/yetone/magpie/internal/claudetui"
 	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/testenv"
@@ -158,8 +159,32 @@ func TestClaudeSilentTurnFails(t *testing.T) {
 							t.Fatalf("17 images: status %d: %s", code, body)
 						}
 						code, body := send(18)
-						if code != 502 || !strings.Contains(body, past.why) {
-							t.Fatalf("18 images: status %d, not a 502 saying %q:\n%s", code, past.why, body)
+						failed := code == 502 && strings.Contains(body, past.why)
+						// A keepalive can commit the stream before Claude exits,
+						// especially under -race on macOS. Its error then travels
+						// in the protocol's failure event under HTTP 200.
+						if stream && code == 200 {
+							for line := range strings.SplitSeq(body, "\n") {
+								data, ok := strings.CutPrefix(line, "data: ")
+								if !ok {
+									continue
+								}
+								v := gjson.Parse(data)
+								switch path {
+								case "/v1/chat/completions":
+									failed = failed || strings.Contains(v.Get("error.message").String(), past.why)
+								case "/v1/messages":
+									failed = failed || v.Get("type").String() == "error" && strings.Contains(v.Get("error.message").String(), past.why)
+								case "/v1/responses":
+									failed = failed || v.Get("type").String() == "response.failed" && strings.Contains(v.Get("response.error.message").String(), past.why)
+								}
+							}
+							if strings.Contains(body, "[DONE]") || strings.Contains(body, `"type":"message_stop"`) || strings.Contains(body, `"type":"response.completed"`) {
+								t.Fatalf("18 images: the failed stream ended as a success:\n%s", body)
+							}
+						}
+						if !failed {
+							t.Fatalf("18 images: status %d, not a failure saying %q:\n%s", code, past.why, body)
 						}
 						if strings.Contains(body, `"content":null`) || strings.Contains(body, "saw 18") {
 							t.Fatalf("18 images: an answer of nothing:\n%s", body)
