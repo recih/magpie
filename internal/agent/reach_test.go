@@ -17,13 +17,12 @@ import (
 // starts with no probe made.
 func fakeReach(t *testing.T, answers map[string]bool) *sync.Mutex {
 	t.Helper()
+	// Drain the previous fixture before replacing its probe and cache.
+	reachForget()
 	var mu sync.Mutex
 	was, age := reachProbe, reachAge
 	reachProbe = func(base string) bool { mu.Lock(); defer mu.Unlock(); return answers[base] }
 	reachAge = time.Hour
-	reach.Lock()
-	reach.m = nil
-	reach.Unlock()
 	t.Cleanup(func() {
 		reachForget()
 		reachProbe, reachAge = was, age
