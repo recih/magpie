@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yetone/magpie/internal/proc"
+	"github.com/yetone/magpie/internal/testenv"
 )
 
 // The Restart on the Codex app's "still signed in as" notice (nb5p_hQ on
@@ -101,6 +102,9 @@ func TestCodexSwitchAppHelper(t *testing.T) {
 	if os.Getenv("MAGPIE_CODEX_SWITCH_HELPER") != "1" {
 		return
 	}
+	if os.Getenv(testenv.Marker) != os.Getenv("MAGPIE_CODEX_SWITCH_SANDBOX") {
+		t.Fatal("the app-server helper made a new sandbox instead of inheriting the fixture")
+	}
 	os.Stdout.WriteString("running\n")
 	time.Sleep(30 * time.Second)
 }
@@ -119,9 +123,11 @@ type fakeCodexApp struct {
 func (f *fakeCodexApp) start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := proc.CommandContext(ctx, os.Args[0], "-test.run=^TestCodexSwitchAppHelper$")
-	// TMPDIR is this test's: given no testenv.Marker, the helper makes a
-	// test home of its own there, which it never removes once ended
-	cmd.Env = []string{"MAGPIE_CODEX_SWITCH_HELPER=1", "TMPDIR=" + f.t.TempDir(), "HOME=" + f.t.TempDir()}
+	// Keep the already isolated environment, including testenv.Marker.
+	// Re-isolating every replacement warms all the stand-ins again on
+	// macOS, spending the restart's deadline before this helper is ready.
+	cmd.Env = append(os.Environ(), "MAGPIE_CODEX_SWITCH_HELPER=1",
+		"MAGPIE_CODEX_SWITCH_SANDBOX="+os.Getenv(testenv.Marker))
 	out, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -143,6 +149,8 @@ func (f *fakeCodexApp) start() {
 	f.started = append(f.started, pid)
 	f.mu.Unlock()
 	go func() {
+		// Cleanup also joins the replacement start and its cleanup registration.
+		defer close(done)
 		_ = cmd.Wait()
 		f.mu.Lock()
 		if f.pid == pid {
@@ -150,7 +158,6 @@ func (f *fakeCodexApp) start() {
 		}
 		back := f.back && ctx.Err() == nil
 		f.mu.Unlock()
-		close(done)
 		if back {
 			// the app notices its app-server gone and starts another
 			time.Sleep(50 * time.Millisecond)
@@ -165,7 +172,8 @@ func (f *fakeCodexApp) start() {
 func TestRestartSwitchedCodexAppReal(t *testing.T) {
 	stubCodexApp(t)
 	oldGone, oldBack := codexAppGoneWait, codexAppBackWait
-	codexAppGoneWait, codexAppBackWait = 5*time.Second, 2*time.Second
+	// Real process startup gets the normal waits; only the no-replacement
+	// case below needs a short deadline.
 	t.Cleanup(func() { codexAppGoneWait, codexAppBackWait = oldGone, oldBack })
 	f := &fakeCodexApp{t: t, back: true}
 	codexAppServersOn = func(context.Context, string) ([]int, error) {
@@ -178,7 +186,12 @@ func TestRestartSwitchedCodexAppReal(t *testing.T) {
 	}
 	endCodexAppServer = proc.End
 	f.start()
-	first := f.started[0]
+	f.mu.Lock()
+	first := f.pid
+	f.mu.Unlock()
+	if first == 0 {
+		t.Fatal("the first app-server did not start")
+	}
 	if err := RestartSwitchedCodexApp(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +206,7 @@ func TestRestartSwitchedCodexAppReal(t *testing.T) {
 	f.mu.Lock()
 	f.back = false
 	f.mu.Unlock()
+	codexAppBackWait = 200 * time.Millisecond
 	CodexAppReopen = func(context.Context) error { return errors.New("not here") }
 	if err := RestartSwitchedCodexApp(context.Background()); !errors.Is(err, ErrCodexAppNotBack) {
 		t.Fatalf("none back: %v", err)
