@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 // it is open too; closed by magpie, it isn't.
 func TestCoveredWindowStaysUp(t *testing.T) {
 	out, err := runAppKit(t, 30*time.Second, []string{"MAGPIE_TEST_WINDOW_UP=1"})
+	t.Logf("%s", out)
 	if err != nil || !strings.Contains(string(out), "window up: ok") {
 		t.Fatalf("window up: %v\n%s", err, out)
 	}
@@ -50,6 +52,10 @@ func init() {
 	waitFor := func(what string, ok func() bool) {
 		for deadline := time.Now().Add(5 * time.Second); !onMain(ok); time.Sleep(20 * time.Millisecond) {
 			if time.Now().After(deadline) {
+				onMain(func() bool {
+					fmt.Printf("[DEBUG-window-up] timeout %s open=%v mini=%v visible=%v front=%v up=%v\n", what, windowOpen(h.main), h.main.IsMinimised(), h.main.IsVisible(), appFrontmost(), windowUp(h.main))
+					return true
+				})
 				fail("timed out waiting until %s", what)
 			}
 		}
@@ -105,8 +111,22 @@ func init() {
 			waitFor("magpie is shown again", func() bool { return windowOpen(h.main) })
 
 			// minimised
+			var miniDone atomic.Bool
+			application.InvokeSync(func() {
+				h.main.OnWindowEvent(events.Mac.WindowDidMiniaturize, func(*application.WindowEvent) {
+					fmt.Printf("[DEBUG-window-up] did miniaturize %s\n", time.Now().Format(time.RFC3339Nano))
+					miniDone.Store(true)
+				})
+				h.main.OnWindowEvent(events.Mac.WindowDidDeminiaturize, func(*application.WindowEvent) {
+					fmt.Printf("[DEBUG-window-up] did deminiaturize %s\n", time.Now().Format(time.RFC3339Nano))
+				})
+			})
 			application.InvokeSync(func() { h.main.Minimise() })
 			waitFor("the window is minimised", func() bool { return h.main.IsMinimised() })
+			fmt.Printf("[DEBUG-window-up] observed minimised, event=%v at %s\n", miniDone.Load(), time.Now().Format(time.RFC3339Nano))
+			if os.Getenv("MAGPIE_TEST_WAIT_MINI_EVENT") == "1" {
+				waitFor("the minimisation event", miniDone.Load)
+			}
 			expect("minimised", true)
 			application.InvokeSync(func() { h.main.UnMinimise() })
 			waitFor("the window is back", func() bool { return windowOpen(h.main) })
