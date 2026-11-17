@@ -56,7 +56,13 @@ func TestClaudeSweepKeepsQuotaSessions(t *testing.T) {
 				bridge.shelf[entry.Key].timer.Stop()
 				delete(bridge.shelf, entry.Key)
 				bridge.runs["active"] = &subscriptionRun{sessionID: entry.Session, sessions: entry.Sessions}
-				defer delete(bridge.runs, "active")
+				defer func() {
+					// Seeing the file disappear does not synchronize with
+					// the sweeper's reads of the bridge's maps.
+					bridge.mu.Lock()
+					delete(bridge.runs, "active")
+					bridge.mu.Unlock()
+				}()
 			}
 			bridge.sweepSessions([]string{dir})
 			eventually(t, "the expired session wasn't swept", func() bool {
