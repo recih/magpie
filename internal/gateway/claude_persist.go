@@ -132,6 +132,8 @@ func (b *subscriptionBridge) keepShelf() {
 // when the file changed since this one looked (b.mu not held). A file that
 // can't be read whole is unknown: nothing is taken from it.
 func (b *subscriptionBridge) loadShelf() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	path := shelfPath()
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -158,14 +160,11 @@ func (b *subscriptionBridge) loadShelf() {
 		if s == nil {
 			continue
 		}
-		b.mu.Lock()
 		if b.shelf[s.key] != nil {
-			b.mu.Unlock()
 			continue
 		}
 		b.shelf[s.key] = s
 		b.shelfTimer(s)
-		b.mu.Unlock()
 	}
 }
 
@@ -306,4 +305,63 @@ func (b *subscriptionBridge) keepForReset(run *subscriptionRun, req *Request, ow
 	b.trimShelf()
 	b.mu.Unlock()
 	log.Printf("claude: a turn refused for the account's limit leaves its conversation's session, cut before the turn, for the turn asked again until %s", heldClock(s.until, now))
+}
+
+// resumed ends the protection while a saved session changes owners.
+func (b *subscriptionBridge) resumed(s *savedSession) {
+	b.mu.Lock()
+	delete(b.resuming, s)
+	b.mu.Unlock()
+}
+
+// keptSessions includes sessions waiting for quota resets, even if their
+// transcripts have not changed for hours. An unreadable shelf is unknown:
+// leave the files alone rather than destroy the only resumable history.
+func (b *subscriptionBridge) keptSessions() (map[string]bool, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	kept := make(map[string]bool)
+	add := func(dirs []string, session string) {
+		for _, dir := range dirs {
+			kept[filepath.Join(dir, session+".jsonl")] = true
+		}
+	}
+	data, err := os.ReadFile(shelfPath())
+	if err != nil && !os.IsNotExist(err) {
+		return nil, false
+	}
+	if err == nil {
+		var f shelfFile
+		if json.Unmarshal(data, &f) != nil || f.Version != shelfFileVersion {
+			return nil, false
+		}
+		for _, entry := range f.Entries {
+			if s := entry.saved(); s != nil {
+				add(s.sessions, s.session)
+			}
+		}
+	}
+	save := func(s *savedSession) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if !s.gone {
+			add(s.sessions, s.session)
+		}
+	}
+	for _, s := range b.shelf {
+		save(s)
+	}
+	for s := range b.resuming {
+		// taken marks it gone just before the run publishes its session id.
+		// The transfer owns the file until resumed releases this pin.
+		s.mu.Lock()
+		add(s.sessions, s.session)
+		s.mu.Unlock()
+	}
+	for _, r := range b.runs {
+		r.mu.Lock()
+		add(r.sessions, r.sessionID)
+		r.mu.Unlock()
+	}
+	return kept, true
 }

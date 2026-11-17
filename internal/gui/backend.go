@@ -29,7 +29,9 @@ var serving sync.WaitGroup
 // stopServing stops this process's gateway taking requests and returns
 // once those in flight have finished.
 func stopServing() {
+	gatewayMu.Lock()
 	endBackend()
+	gatewayMu.Unlock()
 	serving.Wait()
 }
 
@@ -136,6 +138,9 @@ func serveGateway() *gateway.Server {
 }
 
 func serveGatewayLocked() *gateway.Server {
+	if backendCtx.Err() != nil {
+		return nil
+	}
 	// paused by the user (gatewaypause.go): nothing serves it until resumed
 	if pausedNow() {
 		return nil

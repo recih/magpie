@@ -1868,8 +1868,15 @@ hold it.
   turn](#a-run-that-ended-during-a-turn-6528)), and when a saved session
   is discarded (`removeSession`).
   `sweepSessions` removes those a stopped gateway left in magpie's own
-  work folder's project, once older than `idleLongest`; a caller's folder
+  work folder's project, once older than `idleLongest` plus a minute; a caller's folder
   is never swept (`clientWorkDir`).
+  A session still in the persisted shelf, the in-memory shelf, an active run,
+  or the transfer from shelf to run (`resuming`) is protected. This includes
+  quota waits longer than an hour. `loadShelf` removes the file and publishes
+  its entries under the same bridge lock as the sweep's snapshot. An
+  unreadable or unknown-version shelf skips the destructive sweep.
+  `TestClaudeSweepKeepsQuotaSessions`, `TestClaudeSweepUnknownShelfLeavesFiles`.
+
 - Claude Code's temp files for the session, the images it was given:
   `<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>/<work project>/<session>`
   (`claudeTempDir`, not on Windows). They are removed with the session
@@ -2209,6 +2216,21 @@ and the turn is told whole to a new run, as after a crash (no file is
 written then). A conversation a client rewrote (`looseTurn`) is not kept,
 and a run in a turn or parked on tool results at the stop is not either.
 `TestClaudeIdleRunSurvivesARestart`, `TestClaudeShelfFileUnreadableFallsBackToReplay`.
+
+The successor can accept before the old gateway saves this file. Before
+starting a Claude subscription turn, `awaitPredecessorSessions` waits for
+`GET /_magpie/claude-ready` on the private callback socket. The old gateway
+answers only after `abortAll` has saved and ended its runs. Request
+cancellation or a failed wait returns an error rather than replaying the
+history; other providers and MCP callbacks continue. The wait is bounded
+by the handover drain plus one minute. A removed socket means the old
+process has finished; a 404 permits older versions without this endpoint,
+whose handover retains the previous race.
+`TestClaudeHandoverWaitsForSavedSession` checks the resumed turn;
+`TestClaudeHandoverReadiness` and `TestClaudeHandoverReadinessCompatibility`
+check readiness, cancellation and older predecessors. Web/serve signal
+exits and desktop shutdown now wait for this gateway shutdown too (see
+[GUI shell](gui-shell.md#a-restart-to-update-hands-the-gateway-over)).
 
 ### A turn refused for the account's limit
 
