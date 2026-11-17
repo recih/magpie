@@ -44,6 +44,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ runner.os != 'macOS' }}
+
+      # setup-go saves only on success. Keep partial macOS builds too:
+      # otherwise a failing test makes every retry compile from scratch.
+      # Each attempt can extend the previous attempt's immutable cache.
+      - name: Restore macOS Go cache
+        if: runner.os == 'macOS'
+        id: macos-go-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+          key: magpie-go-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            magpie-go-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-
 
       # The GUI links GTK 3 and WebKitGTK 4.1 through cgo on Linux (see the
       # Makefile), so vet and test need their headers and the gtk3 tag.
@@ -94,7 +110,11 @@ jobs:
         timeout-minutes: 75
         shell: bash
         run: |
-          go test -timeout 30m -tags "${{ steps.tags.outputs.tags }}" $(go list -tags "${{ steps.tags.outputs.tags }}" ./... | grep -v '/internal/gateway$')
+          # JSON streams each test's progress instead of holding all output
+          # behind the first unfinished package on a slow macOS build.
+          progress=()
+          if [ "$RUNNER_OS" = macOS ]; then progress=(-json); fi
+          go test "${progress[@]}" -timeout 30m -tags "${{ steps.tags.outputs.tags }}" $(go list -tags "${{ steps.tags.outputs.tags }}" ./... | grep -v '/internal/gateway$')
           go test -c -o "$RUNNER_TEMP/gateway.test" -tags "${{ steps.tags.outputs.tags }}" ./internal/gateway/
           build/race-shards.sh internal/gateway "$RUNNER_TEMP/gateway.test" "$(getconf _NPROCESSORS_ONLN)" -test.timeout=20m
 
@@ -176,6 +196,15 @@ jobs:
       - name: Windows VS Code detection
         if: runner.os == 'Windows'
         run: go test -v -count=1 ./internal/agent -run '^TestVSCodeDetected$'
+
+      - name: Save macOS Go cache
+        if: always() && runner.os == 'macOS' && steps.macos-go-cache.outputs.cache-primary-key != '' && steps.macos-go-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+          key: ${{ steps.macos-go-cache.outputs.cache-primary-key }}
 
   cli:
     name: cli (${{ matrix.goos }}/${{ matrix.goarch }}, nogui)
