@@ -112,8 +112,11 @@ jobs:
         run: |
           # JSON streams each test's progress instead of holding all output
           # behind the first unfinished package on a slow macOS build.
+          # Go's result-cache input scan held macOS packages for 32-39m
+          # after printing ok. Run once without that scan; the build cache
+          # above still reuses compiled code.
           progress=()
-          if [ "$RUNNER_OS" = macOS ]; then progress=(-json); fi
+          if [ "$RUNNER_OS" = macOS ]; then progress=(-json -count=1); fi
           go test "${progress[@]}" -timeout 30m -tags "${{ steps.tags.outputs.tags }}" $(go list -tags "${{ steps.tags.outputs.tags }}" ./... | grep -v '/internal/gateway$')
           go test -c -o "$RUNNER_TEMP/gateway.test" -tags "${{ steps.tags.outputs.tags }}" ./internal/gateway/
           build/race-shards.sh internal/gateway "$RUNNER_TEMP/gateway.test" "$(getconf _NPROCESSORS_ONLN)" -test.timeout=20m
