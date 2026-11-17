@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      macos_runner:
+        description: macOS runner (Intel is an alternative when ARM64 capacity is unavailable)
+        type: choice
+        default: macos-latest
+        options:
+          - macos-latest
+          - macos-26-intel
 
 # On main a run finishes: a release waits for a green run, and one cancelled
 # by every next push left none to wait for (LESSONS.md). A newer push still
@@ -22,7 +30,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Automatic runs keep their usual runner; manual runs can use Intel
+        # when GitHub cannot allocate an ARM64 host. Both run the same suite.
+        os:
+          - ubuntu-latest
+          - ${{ inputs.macos_runner || 'macos-latest' }}
+          - windows-latest
     runs-on: ${{ matrix.os }}
 
     steps:
