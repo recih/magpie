@@ -108,8 +108,11 @@ func init() {
 			application.InvokeSync(func() { h.main.Minimise() })
 			waitFor("the window is minimised", func() bool { return h.main.IsMinimised() })
 			expect("minimised", true)
-			application.InvokeSync(func() { h.main.UnMinimise() })
+			// Reopen as a Dock click does. UnMinimise alone can clear the
+			// minimised state without ordering the window in on macOS.
+			application.InvokeSync(h.reopenMain)
 			waitFor("the window is back", func() bool { return windowOpen(h.main) })
+			expect("reopened", true)
 
 			// closed by magpie
 			h.hideMain()
