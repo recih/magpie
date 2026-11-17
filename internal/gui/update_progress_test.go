@@ -128,8 +128,8 @@ func TestUpdateSpeedFallsWhenStalled(t *testing.T) {
 
 // The update's check is bounded (checkWait), its download isn't: one
 // still moving past that bound finishes (#5572, an 83 MB download under
-// ~140 KB/s failed at 10 minutes part way). Here the bound is 200ms and
-// the bytes take ~600ms.
+// ~140 KB/s failed at 10 minutes part way). Give a loaded runner 2s to
+// check the feed; the bytes take ~6s, still well past that bound.
 func TestUpdateSlowDownloadOutlastsTheCheckBound(t *testing.T) {
 	h := t.TempDir()
 	t.Setenv("HOME", h)
@@ -137,7 +137,7 @@ func TestUpdateSlowDownloadOutlastsTheCheckBound(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(h, ".config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(h, ".cache"))
 	old := checkWait
-	checkWait = 200 * time.Millisecond
+	checkWait = 2 * time.Second
 	t.Cleanup(func() { checkWait = old })
 
 	const chunk, chunks = 4 << 10, 10
@@ -153,7 +153,7 @@ func TestUpdateSlowDownloadOutlastsTheCheckBound(t *testing.T) {
 					return
 				}
 				w.(http.Flusher).Flush()
-				time.Sleep(60 * time.Millisecond)
+				time.Sleep(600 * time.Millisecond)
 			}
 			return
 		}
