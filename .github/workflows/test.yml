@@ -12,10 +12,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Baseline window restoration
-        continue-on-error: true
-        run: go test -v -count=10 -timeout 10m ./internal/gui -run '^TestCoveredWindowStaysUp$'
-      - name: Wait for minimisation event
-        env:
-          MAGPIE_TEST_WAIT_MINI_EVENT: '1'
+      - name: Reopen the window through the app
         run: go test -v -count=20 -timeout 10m ./internal/gui -run '^TestCoveredWindowStaysUp$'
