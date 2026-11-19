@@ -2034,7 +2034,21 @@ two minutes after the timeout write 118K tokens to the cache, and a
 tunnel drop's two retried sub-agents and their delayed AgentSummary write
 305K.
 
-Now `removeRun` keeps such a run's session for a branch to be cut from
+When a client cancels a request with a known turn boundary, both modes
+save a separate transcript ending at the preceding completed reply. The
+ordinary shelf matches the account, request settings and history up to
+that reply, so the next user message may differ from the cancelled one.
+A print run that rewinds successfully can still answer in place. On a
+gateway restart the saved copy is available even when the rewound
+process or ended run is gone. A turn registers before it claims the run. A replacement waits for a
+cancellation already in progress and can itself be cancelled while waiting.
+The cut requires the preceding reply's end_turn row or the original length
+of a resumed native session. A transcript reconstructed for a cold request
+does not provide that native boundary. A fresh run with no known boundary and a request
+with client-owned cache marks keep their existing behavior.
+`TestClaudeReplacementAfterCancel` covers both modes.
+
+Separately, `removeRun` keeps such a run's session for a branch to be cut from
 (`keepEnded`, [`claude_ended.go`](../../internal/gateway/claude_ended.go)),
 in the same `b.mu` section that takes it out of `runs`, so no request
 between finds it in neither. The run object is kept as it ended: its
