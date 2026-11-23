@@ -1246,7 +1246,8 @@ arguments are never kept, not even masked.
 Claude Code's AgentSummary ("Describe your most recent action in 3-5
 words.") and its auto mode classifier name themselves nowhere in the
 request, so `inferredKind` (observe.go) tells them by their content, for
-a `claude-cli/` request on the Messages API only, and the ledger row's
+a `claude-cli/` request on the Messages API (including the original
+client User-Agent passed through a Remote magpie), and the ledger row's
 Kind is `agent_summary_inferred` or `auto_mode_check_inferred`
 (`usage.InferredSuffix`). The name says "(inferred)"; both spellings share
 the plain kind's purpose, which a client marker would use. Anything else
