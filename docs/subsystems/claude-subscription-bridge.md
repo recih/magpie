@@ -1630,8 +1630,11 @@ unnamed takes the named owner of the same provider's own sign-in
 (`takeNamedOwner`), and goes on: a run in Claude Code's own home runs as
 whatever that home is signed in to. A turn that ends without a tool call
 takes the name before its keys are made (`nameOwner`, from
-`provider.ClaudeOwnName`), so the next turn finds the idle run. Every
-other change of owner still lets the run go. The owner is an atomic
+`provider.ClaudeOwnName`), so the next turn finds the idle run. A fork routed
+to another account starts its own run. Matching its parent's tool IDs
+leaves the parent's pending results and timeout intact, so the parent
+can continue on its own account. When the same login moves homes, a
+matching result still retires the obsolete process. The owner is an atomic
 pointer (`owned`), read by the run's reader without a lock.
 
 ### A conversation the client rewrote (#912)
