@@ -6523,6 +6523,24 @@ func withImages(m Message) bool {
 // read before the results it is about to get.
 var queuedWait = 2 * time.Second
 
+// missingResults checks the calls the reply exposed, including those Claude
+// Code has not registered an MCP callback for yet.
+func (r *subscriptionRun) missingResults(results []Part) []string {
+	answered := make(map[string]bool, len(results))
+	for _, result := range results {
+		answered[result.CallID] = true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var missing []string
+	for _, call := range r.shown {
+		if !answered[call.id] {
+			missing = append(missing, call.id)
+		}
+	}
+	return missing
+}
+
 // continueWith hands the agent its tool results: at once for the calls it
 // is waiting on, the others kept until it makes them. tools, when set, are
 // the agent's tools from now on, handed over with the results.
@@ -7707,6 +7725,13 @@ func (s *Server) serveSubscriptionAs(w http.ResponseWriter, r *http.Request, fro
 		log.Printf("%s on %s: tool results go on in a run of their own: earlier messages changed while the run that made the calls waits for them", name, model)
 		run.released()
 		run, how = nil, ""
+	}
+	if run != nil {
+		if missing := run.missingResults(results); len(missing) != 0 {
+			run.released()
+			msg := name + ": incomplete tool results after the last reply (missing: " + strings.Join(missing, ", ") + "). Resend the complete set of results, or start a new conversation from before the interrupted reply after checking which tools already ran."
+			return writeError(w, from, http.StatusBadRequest, msg), msg
+		}
 	}
 	// the client offers a tool the run's agent was never told of, as Claude
 	// Code's ToolSearch loads a deferred one mid-turn: the run is handed it

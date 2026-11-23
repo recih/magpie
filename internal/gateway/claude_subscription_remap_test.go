@@ -366,3 +366,36 @@ func TestHistoryKeyLeavesOutToolIDs(t *testing.T) {
 		t.Error("results answering the other calls have the same key")
 	}
 }
+
+// The bridge streamed five calls, but a connection loss left the client
+// with only three. The later callbacks need not have arrived at the bridge.
+func TestClaudeInterruptedToolBatch(t *testing.T) {
+	h := newRemapHarness(t)
+	calls := []string{"a={}", "b={}", "c={}", "d={}", "e={}"}
+	results := []string{"a=A", "b=B", "c=C", "d=D", "e=E"}
+	var first chan mcpToolResult
+	h.first = func(run *subscriptionRun, req *Request) {
+		first = h.calls(run, false, shownCall{"a", "read", "{}"}, shownCall{"b", "read", "{}"},
+			shownCall{"c", "read", "{}"}, shownCall{"d", "read", "{}"}, shownCall{"e", "read", "{}"})[0]
+		run.resume = func() { h.says(run, "continued") }
+	}
+	user := remapUser("read five files")
+	h.ask(user)
+	body := `{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"tools":[{"name":"read","input_schema":{"type":"object"}}],"messages":[` +
+		strings.Join([]string{user, remapCalls(calls[:3]...), remapResults(results[:3]...)}, ",") + `]}`
+	rec := httptest.NewRecorder()
+	code, _ := h.s.serveSubscription(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body)), provider.Anthropic,
+		"Claude Code", "claude-sonnet-5", "", []byte(body), &Usage{}, h.start)
+	if code != 400 || rec.Code != 400 || !strings.Contains(rec.Body.String(), "missing: d, e") {
+		t.Fatalf("partial batch returned %d: %s", code, rec.Body)
+	}
+	select {
+	case <-first:
+		t.Fatal("partial batch consumed the first tool result")
+	default:
+	}
+	reply := h.ask(user, remapCalls(calls...), remapResults(results...))
+	if len(reply) != 1 || reply[0] != "text continued" || h.runs() != 1 || resultOf(t, first) != "A" {
+		t.Fatalf("complete retry did not resume the original run: %v", reply)
+	}
+}

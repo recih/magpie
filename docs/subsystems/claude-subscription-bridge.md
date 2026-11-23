@@ -2026,6 +2026,14 @@ there and gets a run started anew (`answeredElsewhere` in the log). It is
 never refused: Claude Code doesn't retry a 409, and the agent that sent it
 stops (ylorn on Discord).
 
+A client connection can break after only some calls reach the client. Before
+delivering any results to a matched run, the bridge checks the results
+against all client tool calls in the reply, including calls whose MCP
+callback has yet to arrive. An incomplete set returns HTTP 400 with the
+missing call IDs. The run stays parked for a complete retry. A client
+without the missing calls can start from before the interrupted reply
+after checking which tools already ran.
+
 Such a run doesn't start from the whole conversation (`branch`). Told in
 one message, the conversation is a prefix the cache has never seen, so a
 900K conversation was written to the cache again for each fork. Aisiverto
